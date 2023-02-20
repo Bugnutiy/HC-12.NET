@@ -158,6 +158,20 @@ void SerialDevices::tick()
     // Serial.println(k);
     // Serial.println("----------------------");
   }
+  if(SSerial->available()){
+    delay(10);
+    Transaction trans;
+    if(serial_reciever(trans))
+    switch (command_parser(trans))
+    {
+    case /* constant-expression */:
+      /* code */
+      break;
+    
+    default:
+      break;
+    }
+  }
 }
 
 void SerialDevices::tmpKey(char *key, const unsigned long &milis)
@@ -216,7 +230,7 @@ void SerialDevices::serial_reciever(Transaction &cmd)
   HammingVar->pack(cmd);
   size_t h_length = HammingVar->length();
 
-  uint8_t buffer[h_length + 1];
+  uint8_t buffer[h_length];
 
   if (SSerial->readBytes((uint8_t *)&buffer, h_length))
   {
