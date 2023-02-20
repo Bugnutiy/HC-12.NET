@@ -141,8 +141,8 @@ void SerialDevices::tick()
   }
 
   unsigned long tt3 = millis();
-  // if (tt3 - t3 > 100 || tt3 < t3)
-  if (1)
+  if (tt3 - t3 > 500 || tt3 < t3)
+  // if (1)
   {
     // Serial.println("----------------------");
     k++;
@@ -158,18 +158,24 @@ void SerialDevices::tick()
     // Serial.println(k);
     // Serial.println("----------------------");
   }
-  if(SSerial->available()){
-    delay(10);
+  if (SSerial->available())
+  {
+    Serial.println(freeMemory());
+    // delay(10);
     Transaction trans;
-    if(serial_reciever(trans))
-    switch (command_parser(trans))
+    if (serial_reciever(trans))
     {
-    case /* constant-expression */:
-      /* code */
-      break;
-    
-    default:
-      break;
+      // Serial.println(trans.Addr_id);
+      // Serial.println(trans.Rem_id);
+      // Serial.println(trans.Trans_id);
+      Serial.println(trans.cmd);
+      Serial.println(freeMemory());
+      // Serial.println(trans.millis);
+      // Serial.println(trans.type);
+    }
+    while (SSerial->available())
+    {
+      SSerial->read();
     }
   }
 }
@@ -224,20 +230,30 @@ void SerialDevices::serial_sender(Transaction &transa)
   // Hambuf.stop(); //Никогда не делай эту херню!!!!!!!
 }
 
-void SerialDevices::serial_reciever(Transaction &cmd)
+bool SerialDevices::serial_reciever(Transaction &cmd)
 {
   // Hamming<HAMMING_SIZE> Hambuf;
   HammingVar->pack(cmd);
   size_t h_length = HammingVar->length();
-
+  Serial.println(h_length);
   uint8_t buffer[h_length];
 
   if (SSerial->readBytes((uint8_t *)&buffer, h_length))
   {
+    while (SSerial->available())
+    {
+      SSerial->read();
+    }
     HammingVar->unpack(buffer, h_length);
-    cmd = *(Transaction *)HammingVar->buffer;
-    xorStr(cmd.cmd, cmd.millis);
+    if (!HammingVar->status())
+    {
+      cmd = *(Transaction *)HammingVar->buffer;
+      xorStr(cmd.cmd, cmd.millis);
+      return 1;
+    }
   }
+
+  return 0;
 }
 
 template <typename T>

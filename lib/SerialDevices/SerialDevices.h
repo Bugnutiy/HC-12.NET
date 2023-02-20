@@ -103,7 +103,7 @@ public:
   void tick();
 
   /// @brief Приём сообщения
-  void serial_reciever(Transaction &cmd);
+  bool serial_reciever(Transaction &cmd);
 
   /// @brief Отправка сообщения
   /// @param cmd Структура транзакция
