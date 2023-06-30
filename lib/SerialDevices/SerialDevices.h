@@ -1,6 +1,6 @@
 #pragma once
 #include <Arduino.h>
-#include "Hamming.h"
+#include "GyverHamming\src\Hamming.h"
 
 #include <LinkedList.h>
 #include <EEManager.h>
