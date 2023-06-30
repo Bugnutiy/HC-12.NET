@@ -1,3 +1,4 @@
+#pragma once
 #define MIN_RAM 200
 
 #define SERIAL_SPEED 115200
