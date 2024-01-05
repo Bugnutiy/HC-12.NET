@@ -1,6 +1,6 @@
 #pragma once
 #include <Arduino.h>
-#include "GyverHamming\src\Hamming.h"
+#include <Hamming.h>
 
 #include <LinkedList.h>
 #include <EEManager.h>
@@ -8,6 +8,7 @@
 // #include <mString.h>
 #include "config.h"
 #include <SoftwareSerial.h>
+#include <Dbg.h>
 
 #pragma pack(push, 1)
 struct DeviceData
@@ -20,8 +21,8 @@ struct DeviceData
 struct Transaction
 {
   byte Rem_id = 0, Addr_id = 0, Trans_id = 0, type = 0;
-  char cmd[MAX_CMD_SIZE] = "";
-  unsigned long millis = 0;
+  byte cmd[MAX_CMD_SIZE];
+  uint32_t millis = 0;
 };
 #pragma pack(pop)
 
@@ -33,7 +34,7 @@ protected:
   const size_t PRIVATE_KEY_LENGTH = strlen(PRIVATE_KEY);
 
   LinkedList<DeviceData> *DevicesList;
-  // SoftwareSerial serial = SoftwareSerial(RX_PIN, TX_PIN);
+  LinkedList<Transaction> *SendList;
   byte _id = 0, _remoteness = 0;
   char _name[16] = "\0";
 
@@ -45,14 +46,14 @@ protected:
 
   Transaction command;
 
-  unsigned long t1=0,t2=0,t3=0;
-
 public:
   SoftwareSerial *SSerial;
 
   /// @brief Конструктор по умолчанию
   SerialDevices();
   ~SerialDevices();
+
+  SerialDevices(uint8_t id, char name[16] = '\0', uint8_t remoteness = 0);
 
   /// @brief Ид этого девайса
   const byte &id = _id;
@@ -110,26 +111,86 @@ public:
   void serial_sender(Transaction &cmd);
 
   /// @brief Xor key и милисекунды особым образом
-  /// @param key 
-  /// @param millis 
-  void tmpKey(char *key, const unsigned long &millis);
+  /// @param key
+  /// @param millis
+  void tmpKey(char *key, const uint32_t &millis);
 
   /// @brief Xor строку с ключом и милисекундами
   /// @param str строка для изменения
   /// @param millis миллисекунды для шифратора
-  void xorStr(char *str, const unsigned long &millis);
+  void encrypt(char *str, const uint32_t &millis);
 
-  ///@brief Выводит в Serial.println сообщение
-  ///@param out сообщение для вывода
-  template <typename T>
-  void dd(const T &out);
+  ///@brief Xor byte массив с ключом и милис
+  ///@param str byte-массив (будет изменен)
+  /// @param millis миллисекунды для шифратора
+  void encrypt(byte *str, const uint32_t &millis);
 };
 
 // extern SerialDevices Device;
 
-
 // .......................................................................................................................
 SerialDevices::SerialDevices()
+{
+  DevicesList = new LinkedList<DeviceData>();
+  E_id = new EEManager(_id);
+  E_remoteness = new EEManager(_remoteness);
+  E_name = new EEManager(_name);
+  HammingVar = new Hamming<HAMMING_SIZE>;
+  SSerial = new SoftwareSerial(RX_PIN, TX_PIN);
+  SendList = new LinkedList<Transaction>();
+
+  // Serial.begin(SERIAL_SPEED);
+  SSerial->begin(SSERIAL_SPEED);
+  SSerial->setTimeout(SERIAL_TIMEOUT);
+
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  byte state = E_id->begin(0, 'i');
+  E_remoteness->begin(E_id->nextAddr(), 'r');
+  E_name->begin(E_remoteness->nextAddr(), 'n');
+  if ((!state) || (_id == 0))
+  {
+    uint16_t timeout = millis();
+    uint16_t sender = timeout;
+    while (_id == 0)
+    {
+      ddd("Мы в цикле while");
+      command.Addr_id = 0;
+      command.Rem_id = 0;
+      command.Trans_id = 0;
+      command.type = 1;
+      command.millis = millis();
+      command.cmd[0] = 0;
+
+      if ((uint16_t)millis() - sender >= 500)
+      {
+        sender = millis();
+        serial_sender(command);
+      }
+
+      if (SSerial->available())
+      {
+        serial_reciever(command);
+      }
+
+      if ((uint16_t)millis() - timeout >= 10000)
+      {
+        _id = 1;
+        _remoteness = 0;
+        _name[0] = 0;
+      }
+    }
+    ddd("Мы вышли из while");
+
+    E_id->updateNow();
+    E_remoteness->updateNow();
+    E_name->updateNow();
+  }
+  else
+  {
+  }
+}
+SerialDevices::SerialDevices(uint8_t id, char name[16], uint8_t remoteness)
 {
   DevicesList = new LinkedList<DeviceData>();
   E_id = new EEManager(_id);
@@ -144,9 +205,22 @@ SerialDevices::SerialDevices()
 
   pinMode(LED_BUILTIN, OUTPUT);
 
-  E_id->begin(0, 'i');
+  byte state = E_id->begin(0, 'i');
   E_remoteness->begin(E_id->nextAddr(), 'r');
   E_name->begin(E_remoteness->nextAddr(), 'n');
+  if ((!state) || (_id == 0))
+  {
+    _id = id;
+    strcpy(_name, name);
+    _remoteness = remoteness;
+
+    E_id->updateNow();
+    E_name->updateNow();
+    E_remoteness->updateNow();
+  }
+  else
+  {
+  }
 }
 
 SerialDevices::~SerialDevices()
@@ -254,75 +328,22 @@ byte SerialDevices::ListSize()
 
 void SerialDevices::tick()
 {
-  unsigned long tt1 = millis();
-  if (tt1 - t1 > 1000 || tt1 < t1)
-  {
-    t1 = tt1;
-    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-  }
-
-  unsigned long tt2 = millis();
-  if (tt2 - t2 > 1000 || tt2 < t2)
-  {
-    t2 = tt2;
-    // Serial.print("PR_KEY_LEN: ");
-    // Serial.println(PRIVATE_KEY_LENGTH);
-  }
-
-  unsigned long tt3 = millis();
-  if (tt3 - t3 > 500 || tt3 < t3)
-  // if (1)
-  {
-    // Serial.println("----------------------");
-    k++;
-    t3 = tt3;
-    Transaction tmp;
-    tmp.Addr_id = 1;
-    tmp.millis = tt3;
-    tmp.Rem_id = 2;
-    tmp.Trans_id = 4;
-    tmp.type = 5;
-    strcpy(tmp.cmd, "testStr");
-    serial_sender(tmp);
-    // Serial.println(k);
-    // Serial.println("----------------------");
-  }
-  if (SSerial->available())
-  {
-    Serial.println(freeMemory());
-    // delay(10);
-    Transaction trans;
-    if (serial_reciever(trans))
-    {
-      // Serial.println(trans.Addr_id);
-      // Serial.println(trans.Rem_id);
-      // Serial.println(trans.Trans_id);
-      Serial.println(trans.cmd);
-      Serial.println(freeMemory());
-      // Serial.println(trans.millis);
-      // Serial.println(trans.type);
-    }
-    while (SSerial->available())
-    {
-      SSerial->read();
-    }
-  }
 }
 
-void SerialDevices::tmpKey(char *key, const unsigned long &milis)
+void SerialDevices::tmpKey(char *key, const uint32_t &milis)
 {
   uint8_t millis_sault[4];
   for (uint8_t i = 0; i < 4; i++)
   {
-    millis_sault[i] = (milis >> (i * 8)) & 0xFF;
-    if (!millis_sault[i])
+    millis_sault[i] = (milis >> (i * 8)) & 0xFF; // раскладываем millis по байтам
+    if (!millis_sault[i])                        // если байт равен 0, то этот байт будет суммой всех байтов
     {
       for (uint8_t j = 0; j < i; j++)
       {
         millis_sault[i] += millis_sault[j];
       }
 
-      if (!millis_sault[i])
+      if (!millis_sault[i]) // если даже предыдущее не помогло, то тупо вкинем единицу в этот байт.
       {
         ++millis_sault[i];
       }
@@ -330,12 +351,25 @@ void SerialDevices::tmpKey(char *key, const unsigned long &milis)
   }
   for (uint8_t i = 0; i < PRIVATE_KEY_LENGTH; i++)
   {
-    key[i] = PRIVATE_KEY[i] ^ millis_sault[i & 3];
+    key[i] = PRIVATE_KEY[i] ^ millis_sault[i & 3]; // засаливаем приватный ключ
   }
   key[PRIVATE_KEY_LENGTH + 1] = 0;
 }
 
-void SerialDevices::xorStr(char *str, const unsigned long &milis)
+void SerialDevices::encrypt(char *str, const uint32_t &milis)
+{
+  char key[PRIVATE_KEY_LENGTH + 1];
+  // strcpy(key,PRIVATE_KEY);
+
+  tmpKey(key, milis);
+
+  for (byte i = 0; i < (MAX_CMD_SIZE - 1); i++)
+  {
+    str[i] ^= key[i % (PRIVATE_KEY_LENGTH)];
+  }
+}
+
+void SerialDevices::encrypt(byte *str, const uint32_t &milis)
 {
   char key[PRIVATE_KEY_LENGTH + 1];
   // strcpy(key,PRIVATE_KEY);
@@ -350,7 +384,7 @@ void SerialDevices::xorStr(char *str, const unsigned long &milis)
 
 void SerialDevices::serial_sender(Transaction &transa)
 {
-  xorStr(transa.cmd, transa.millis);
+  encrypt(transa.cmd, transa.millis);
   // Hamming<HAMMING_SIZE> Hambuf;
   // Serial.println(transa.cmd);
   HammingVar->pack(transa);
@@ -359,12 +393,12 @@ void SerialDevices::serial_sender(Transaction &transa)
   // Hambuf.stop(); //Никогда не делай эту херню!!!!!!!
 }
 
-bool SerialDevices::serial_reciever(Transaction &cmd)
+bool SerialDevices::serial_reciever(Transaction &package)
 {
   // Hamming<HAMMING_SIZE> Hambuf;
-  HammingVar->pack(cmd);
+  HammingVar->pack(package);
   size_t h_length = HammingVar->length();
-  Serial.println(h_length);
+  // Serial.println(h_length);
   uint8_t buffer[h_length];
 
   if (SSerial->readBytes((uint8_t *)&buffer, h_length))
@@ -376,19 +410,13 @@ bool SerialDevices::serial_reciever(Transaction &cmd)
     HammingVar->unpack(buffer, h_length);
     if (!HammingVar->status())
     {
-      cmd = *(Transaction *)HammingVar->buffer;
-      xorStr(cmd.cmd, cmd.millis);
+      package = *(Transaction *)HammingVar->buffer;
+      encrypt(package.cmd, package.millis);
       return 1;
     }
   }
 
   return 0;
-}
-
-template <typename T>
-void SerialDevices::dd(const T &out)
-{
-  // Serial.println(out);
 }
 
 // имя_класса имя_объекта = имя_класса();
